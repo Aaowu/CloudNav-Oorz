@@ -22,6 +22,7 @@ export interface SiteSettings {
   navTitle: string;
   favicon: string;
   cardStyle: 'detailed' | 'simple';
+  requirePasswordOnVisit?: boolean;
 }
 
 export interface AppState {

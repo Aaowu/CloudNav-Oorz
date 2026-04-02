@@ -28,6 +28,46 @@ const WEBDAV_CONFIG_KEY = 'cloudnav_webdav_config';
 const AI_CONFIG_KEY = 'cloudnav_ai_config';
 const SEARCH_ENGINES_KEY = 'cloudnav_search_engines';
 
+const createRoundedFavicon = (source: string): Promise<string> => {
+  return new Promise((resolve) => {
+    if (!source) {
+      resolve(source);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const size = 64;
+        const radius = 14;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(source);
+        ctx.beginPath();
+        ctx.moveTo(radius, 0);
+        ctx.lineTo(size - radius, 0);
+        ctx.quadraticCurveTo(size, 0, size, radius);
+        ctx.lineTo(size, size - radius);
+        ctx.quadraticCurveTo(size, size, size - radius, size);
+        ctx.lineTo(radius, size);
+        ctx.quadraticCurveTo(0, size, 0, size - radius);
+        ctx.lineTo(0, radius);
+        ctx.quadraticCurveTo(0, 0, radius, 0);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(img, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        resolve(source);
+      }
+    };
+    img.onerror = () => resolve(source);
+    img.src = source;
+  });
+};
+
 function App() {
   // --- State ---
   const [links, setLinks] = useState<LinkItem[]>([]);
@@ -55,10 +95,11 @@ function App() {
   
   // Site Settings - Initialized with defaults to prevent crash
   const [siteSettings, setSiteSettings] = useState<SiteSettings>({
-      title: 'CloudNav - 我的导航',
+      title: '',
       navTitle: '云航 CloudNav',
       favicon: '',
-      cardStyle: 'detailed'
+      cardStyle: 'detailed',
+      requirePasswordOnVisit: false
   });
   
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -114,6 +155,8 @@ function App() {
   
   const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [authToken, setAuthToken] = useState<string>('');
+  const [requiresAuth, setRequiresAuth] = useState<boolean | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const mainRef = useRef<HTMLDivElement>(null);
   const isAutoScrollingRef = useRef(false);
@@ -213,7 +256,21 @@ function App() {
 
     const initData = async () => {
         try {
-            const res = await fetch('/api/storage');
+            const authRes = await fetch('/api/storage?checkAuth=true');
+            if (authRes.ok) {
+                const authData = await authRes.json();
+                setRequiresAuth(authData.requiresAuth);
+                if (authData.requiresAuth && !savedToken) {
+                    setIsCheckingAuth(false);
+                    return;
+                }
+            }
+        } catch (e) {}
+
+        try {
+            const res = await fetch('/api/storage', {
+              headers: savedToken ? { 'x-auth-password': savedToken } : {}
+            });
             if (res.ok) {
                 const data = await res.json();
                 if (data.links && data.links.length > 0) {
@@ -221,6 +278,7 @@ function App() {
                     setCategories(data.categories || DEFAULT_CATEGORIES);
                     if (data.settings) setSiteSettings(prev => ({ ...prev, ...data.settings }));
                     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+                    setIsCheckingAuth(false);
                     return;
                 }
             } 
@@ -228,18 +286,24 @@ function App() {
             console.warn("Failed to fetch from cloud, falling back to local.", e);
         }
         loadFromLocal();
+        setIsCheckingAuth(false);
     };
 
     initData();
   }, []);
 
   useEffect(() => {
-      document.title = siteSettings.title || 'CloudNav';
-      const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-      if (link && siteSettings.favicon) {
-          link.href = siteSettings.favicon;
+      if (siteSettings.title) {
+        document.title = siteSettings.title;
       }
-  }, [siteSettings]);
+      const updateFavicon = async () => {
+        const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+        if (link && siteSettings.favicon) {
+          link.href = await createRoundedFavicon(siteSettings.favicon);
+        }
+      };
+      updateFavicon();
+  }, [siteSettings.title, siteSettings.favicon]);
 
   useEffect(() => {
       const handleClickOutside = (e: MouseEvent) => {
@@ -320,7 +384,7 @@ function App() {
                 'Content-Type': 'application/json',
                 'x-auth-password': password
             },
-            body: JSON.stringify({ links, categories, settings: siteSettings })
+            body: JSON.stringify({ authOnly: true })
         });
         
         if (response.ok) {
@@ -328,6 +392,20 @@ function App() {
             localStorage.setItem(AUTH_KEY, password);
             setIsAuthOpen(false);
             setSyncStatus('saved');
+            try {
+              const res = await fetch('/api/storage', {
+                headers: { 'x-auth-password': password }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.links && data.links.length > 0) {
+                  setLinks(data.links);
+                  setCategories(data.categories || DEFAULT_CATEGORIES);
+                  if (data.settings) setSiteSettings(prev => ({ ...prev, ...data.settings }));
+                  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+                }
+              }
+            } catch (e) {}
             return true;
         }
         return false;
@@ -546,6 +624,14 @@ function App() {
       );
   };
 
+  if (isCheckingAuth && requiresAuth === null) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden text-slate-900 dark:text-slate-50">
       
@@ -595,7 +681,22 @@ function App() {
           </div>
       )}
 
-      <AuthModal isOpen={isAuthOpen} onLogin={handleLogin} />
+      <AuthModal
+        isOpen={isAuthOpen}
+        onLogin={handleLogin}
+        onClose={() => setIsAuthOpen(false)}
+        canClose={true}
+        description="输入部署时设置的 PASSWORD，验证后就能继续操作。"
+      />
+      {requiresAuth && !authToken && (
+        <AuthModal
+          isOpen={true}
+          onLogin={handleLogin}
+          description="这个站点开了访问验证，先输密码才能看。"
+        />
+      )}
+      {(!requiresAuth || authToken) && (
+      <>
       
       <CategoryAuthModal 
         isOpen={!!catAuthModalData}
@@ -670,7 +771,7 @@ function App() {
         <div className="h-16 flex items-center px-6 border-b border-slate-100 dark:border-slate-700 shrink-0 gap-3">
              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/30 overflow-hidden">
                  {siteSettings.favicon ? (
-                    <img src={siteSettings.favicon} alt="" className="w-full h-full object-cover" />
+                    <img src={siteSettings.favicon} alt="" className="w-full h-full object-cover rounded-xl" />
                  ) : (
                     "C"
                  )}
@@ -747,7 +848,7 @@ function App() {
                     <span>备份</span>
                 </button>
                 <button 
-                    onClick={() => setIsSettingsModalOpen(true)}
+                    onClick={() => { if(!authToken) setIsAuthOpen(true); else setIsSettingsModalOpen(true); }}
                     className="flex flex-col items-center justify-center gap-1 p-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-600 transition-all"
                     title="AI 设置"
                 >
@@ -984,6 +1085,8 @@ function App() {
         initialData={editingLink || (prefillLink as LinkItem)}
         aiConfig={aiConfig}
       />
+      </>
+      )}
     </div>
   );
 }

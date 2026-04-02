@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Save, Bot, Key, Globe, Sparkles, PauseCircle, Wrench, Box, Copy, Check, List, GripVertical, Filter, LayoutTemplate, RefreshCw, Info, Download, Sidebar, Keyboard, MousePointerClick, AlertTriangle, Package, Zap, Menu } from 'lucide-react';
+import { X, Save, Bot, Key, Globe, Sparkles, PauseCircle, Wrench, Box, Copy, Check, List, GripVertical, Filter, LayoutTemplate, RefreshCw, Info, Download, Sidebar, Keyboard, MousePointerClick, AlertTriangle, Package, Zap, Menu, Upload } from 'lucide-react';
 import { AIConfig, LinkItem, Category, SiteSettings } from '../types';
 import { generateLinkDescription } from '../services/geminiService';
 import JSZip from 'jszip';
@@ -75,6 +75,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const [domain, setDomain] = useState('');
   const [browserType, setBrowserType] = useState<'chrome' | 'firefox'>('chrome');
   const [isZipping, setIsZipping] = useState(false);
+  const faviconUploadRef = useRef<HTMLInputElement>(null);
   
   // Link Management State
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -133,6 +134,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         const next = { ...prev, [key]: value };
         return next;
     });
+  };
+
+  const handleLocalFaviconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+          alert('请上传图片文件');
+          e.target.value = '';
+          return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+          if (typeof reader.result === 'string') {
+              handleSiteChange('favicon', reader.result as any);
+          }
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
   };
 
   const handleSave = () => {
@@ -230,12 +249,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Extension Generators v7.6
   const getManifestJson = () => {
+    const navName = localSiteSettings.navTitle || "CloudNav";
     const json: any = {
         manifest_version: 3,
-        name: (localSiteSettings.navTitle || "CloudNav") + " Pro",
+        name: navName + " Pro",
         version: "7.6",
         minimum_chrome_version: "116",
-        description: "CloudNav - 极速侧边栏与智能收藏",
+        description: `${navName} - 极速侧边栏与智能收藏`,
         permissions: ["activeTab", "scripting", "sidePanel", "storage", "favicon", "contextMenus", "notifications", "tabs"],
         background: {
             service_worker: "background.js"
@@ -255,7 +275,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               "default": "Ctrl+Shift+E",
               "mac": "Command+Shift+E"
             },
-            "description": "打开/关闭 CloudNav 侧边栏"
+            "description": `打开/关闭 ${navName} 侧边栏`
           }
         }
     };
@@ -276,7 +296,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 // 内置配置
 const CONFIG = {
   apiBase: "${domain}",
-  password: "${password}"
+  password: "${password}",
+  siteName: "${(localSiteSettings.navTitle || 'CloudNav').replace(/"/g, '\\"')}"
 };
 
 // 缓存数据
@@ -352,7 +373,7 @@ function buildMenus() {
         // 创建一个统一的根菜单，同时支持 "page" (网页右键), "link" (链接右键), "action" (图标右键)
         chrome.contextMenus.create({
             id: "cloudnav_root",
-            title: "⚡ 保存到 CloudNav",
+            title: \`⚡ 保存到 \${CONFIG.siteName}\`,
             contexts: ["page", "link", "action"]
         });
 
@@ -385,7 +406,7 @@ function updateMenuTitle(url) {
     // 检查是否存在
     const exists = linkCache.some(l => l.url && l.url.replace(/\\/$/, '').toLowerCase() === cleanUrl);
     
-    const newTitle = exists ? "⚠️ 已存在 - 保存到 CloudNav" : "⚡ 保存到 CloudNav";
+    const newTitle = exists ? \`⚠️ 已存在 - 保存到 \${CONFIG.siteName}\` : \`⚡ 保存到 \${CONFIG.siteName}\`;
     
     // 仅更新标题，不重绘整个菜单，性能更高
     chrome.contextMenus.update("cloudnav_root", { title: newTitle }, () => {
@@ -462,7 +483,7 @@ async function saveLink(title, url, categoryId, icon = '') {
         });
 
         if (res.ok) {
-            notify('保存成功', \`已保存到 CloudNav\`);
+            notify('保存成功', \`已保存到 \${CONFIG.siteName}\`);
             chrome.runtime.sendMessage({ type: 'refresh' }).catch(() => {});
             // 乐观更新缓存
             const newLink = { id: Date.now().toString(), title, url, categoryId, icon };
@@ -510,10 +531,12 @@ function notify(title, message) {
                 --muted: #94a3b8;
             }
         }
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding-bottom: 20px; width: 100%; box-sizing: border-box; }
+        html, body { width: 100%; min-width: 0; max-width: 100%; overflow-x: hidden; }
+        * { box-sizing: border-box; min-width: 0; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding-bottom: 20px; }
         
-        .header { position: sticky; top: 0; padding: 10px 12px; background: var(--bg); border-bottom: 1px solid var(--border); z-index: 10; display: flex; gap: 8px; }
-        .search-input { flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--hover); color: var(--text); outline: none; box-sizing: border-box; font-size: 13px; }
+        .header { position: sticky; top: 0; padding: 10px 12px; background: var(--bg); border-bottom: 1px solid var(--border); z-index: 10; display: flex; gap: 8px; min-width: 0; }
+        .search-input { flex: 1; min-width: 0; width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--hover); color: var(--text); outline: none; font-size: 13px; }
         .search-input:focus { border-color: var(--accent); }
         
         .refresh-btn { width: 30px; display: flex; items-center; justify-content: center; border: 1px solid var(--border); background: var(--hover); border-radius: 6px; color: var(--muted); cursor: pointer; transition: all 0.2s; }
@@ -522,13 +545,14 @@ function notify(title, message) {
         .rotating { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
-        .content { padding: 4px; }
+        .content { padding: 4px; min-width: 0; }
         .cat-group { margin-bottom: 2px; }
         .cat-header { 
             padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--text); 
             cursor: pointer; display: flex; items-center; gap: 8px; border-radius: 6px;
             user-select: none; transition: background 0.1s;
         }
+        .cat-header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .cat-header:hover { background: var(--hover); }
         .cat-arrow { width: 14px; height: 14px; color: var(--muted); transition: transform 0.2s; }
         .cat-header.active .cat-arrow { transform: rotate(90deg); color: var(--accent); }
@@ -926,8 +950,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">网站图标 (Favicon URL)</label>
                                 <div className="flex gap-3 items-center">
-                                    <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600">
-                                        {localSiteSettings.favicon ? <img src={localSiteSettings.favicon} className="w-full h-full object-cover"/> : <Globe size={20} className="text-slate-400"/>}
+                                    <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600">
+                                        {localSiteSettings.favicon ? <img src={localSiteSettings.favicon} className="w-full h-full object-cover rounded-xl"/> : <Globe size={20} className="text-slate-400"/>}
                                     </div>
                                     <input 
                                         type="text" 
@@ -936,6 +960,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                                         placeholder="https://example.com/favicon.ico"
                                         className="flex-1 p-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
                                     />
+                                </div>
+                                <div className="mt-2 flex items-center gap-2">
+                                    <input
+                                        ref={faviconUploadRef}
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={handleLocalFaviconUpload}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => faviconUploadRef.current?.click()}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                    >
+                                        <Upload size={12} />
+                                        本地上传
+                                    </button>
+                                    <p className="text-xs text-slate-500">会直接存成图片数据，不用图床。</p>
                                 </div>
                                 <div className="mt-3">
                                     <div className="flex items-center justify-between mb-2">
@@ -953,12 +995,38 @@ document.addEventListener('DOMContentLoaded', async () => {
                                             <button 
                                                 key={idx}
                                                 onClick={() => handleSiteChange('favicon', icon)}
-                                                className="w-8 h-8 rounded hover:ring-2 ring-blue-500 transition-all border border-slate-100 dark:border-slate-600"
+                                                className="w-8 h-8 rounded-xl overflow-hidden hover:ring-2 ring-blue-500 transition-all border border-slate-100 dark:border-slate-600"
                                             >
-                                                <img src={icon} className="w-full h-full rounded" />
+                                                <img src={icon} className="w-full h-full object-cover rounded-xl" />
                                             </button>
                                         ))}
                                     </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/40 px-4 py-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">访问时先验密</label>
+                                        <p className="text-xs text-slate-500 mt-1">打开后先输密码才能看。关闭后，只有点设置这些操作才验密。</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setLocalSiteSettings(prev => ({ ...prev, requirePasswordOnVisit: !prev.requirePasswordOnVisit }))}
+                                        className={`relative inline-flex h-8 w-14 items-center rounded-full border transition-all duration-200 ${
+                                            localSiteSettings.requirePasswordOnVisit
+                                              ? 'border-blue-500 bg-blue-600 shadow-[0_0_0_4px_rgba(59,130,246,0.12)]'
+                                              : 'border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800'
+                                        }`}
+                                        aria-pressed={localSiteSettings.requirePasswordOnVisit}
+                                    >
+                                        <span
+                                            className={`inline-flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                                                localSiteSettings.requirePasswordOnVisit ? 'translate-x-7' : 'translate-x-1'
+                                            }`}
+                                        >
+                                            <span className={`h-2.5 w-2.5 rounded-full ${localSiteSettings.requirePasswordOnVisit ? 'bg-blue-600' : 'bg-slate-400'}`} />
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1104,32 +1172,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <div className="space-y-3">
                             <h4 className="font-medium text-slate-800 dark:text-slate-200 flex items-center gap-2">
                                 <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">1</span>
-                                输入访问密码
+                                扩展地址
                             </h4>
                             <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-                                <div className="space-y-3">
-                                     <div>
-                                        <label className="text-xs text-slate-500 mb-1 block">API 域名 (自动获取)</label>
-                                        <code className="block w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs text-slate-600 dark:text-slate-400 font-mono truncate">
-                                            {domain}
-                                        </code>
-                                     </div>
-                                     <div>
-                                        <label className="text-xs text-slate-500 mb-1 block">访问密码 (Password)</label>
-                                        <div className="flex gap-2">
-                                            <input 
-                                                type="text" 
-                                                value={password} 
-                                                readOnly 
-                                                className="flex-1 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-sm outline-none font-mono"
-                                                placeholder="未登录 / 未设置"
-                                            />
-                                             <button onClick={() => handleCopy(password, 'pwd')} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:border-blue-500 rounded text-slate-600 dark:text-slate-400 transition-colors">
-                                                {copiedStates['pwd'] ? <Check size={16}/> : <Copy size={16}/>}
-                                            </button>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 mt-1">此密码对应您部署时设置的 PASSWORD 环境变量。</p>
-                                     </div>
+                                <div>
+                                    <label className="text-xs text-slate-500 mb-1 block">API 域名 (自动获取)</label>
+                                    <code className="block w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-xs text-slate-600 dark:text-slate-400 font-mono truncate">
+                                        {domain}
+                                    </code>
                                 </div>
                             </div>
                         </div>
@@ -1214,8 +1264,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                             <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
                                 <div className="flex items-center gap-4">
-                                     <div className="w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600">
-                                        {localSiteSettings.favicon ? <img src={localSiteSettings.favicon} className="w-full h-full object-cover"/> : <Globe size={24} className="text-slate-400"/>}
+                                     <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600">
+                                        {localSiteSettings.favicon ? <img src={localSiteSettings.favicon} className="w-full h-full object-cover rounded-xl"/> : <Globe size={24} className="text-slate-400"/>}
                                     </div>
                                     <div>
                                         <div className="font-medium text-sm dark:text-white">插件图标 (icon.png)</div>

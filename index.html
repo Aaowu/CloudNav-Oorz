@@ -4,7 +4,66 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="https://lucide.dev/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>云航 CloudNav</title>
+    <title></title>
+    <script>
+      (function () {
+        function applyRoundedFavicon(source) {
+          if (!source) return;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = function () {
+            try {
+              var size = 64;
+              var radius = 14;
+              var canvas = document.createElement('canvas');
+              canvas.width = size;
+              canvas.height = size;
+              var ctx = canvas.getContext('2d');
+              if (!ctx) return;
+              ctx.beginPath();
+              ctx.moveTo(radius, 0);
+              ctx.lineTo(size - radius, 0);
+              ctx.quadraticCurveTo(size, 0, size, radius);
+              ctx.lineTo(size, size - radius);
+              ctx.quadraticCurveTo(size, size, size - radius, size);
+              ctx.lineTo(radius, size);
+              ctx.quadraticCurveTo(0, size, 0, size - radius);
+              ctx.lineTo(0, radius);
+              ctx.quadraticCurveTo(0, 0, radius, 0);
+              ctx.closePath();
+              ctx.clip();
+              ctx.drawImage(img, 0, 0, size, size);
+              var favicon = document.querySelector('link[rel="icon"]');
+              if (favicon) favicon.href = canvas.toDataURL('image/png');
+            } catch (e) {}
+          };
+          img.onerror = function () {
+            var favicon = document.querySelector('link[rel="icon"]');
+            if (favicon) favicon.href = source;
+          };
+          img.src = source;
+        }
+
+        try {
+          var saved = localStorage.getItem('cloudnav_data_cache');
+          var settings = null;
+          if (saved) {
+            var parsed = JSON.parse(saved);
+            settings = parsed && parsed.settings ? parsed.settings : null;
+          }
+          if (!settings) {
+            var req = new XMLHttpRequest();
+            req.open('GET', '/api/storage?getConfig=website', false);
+            req.send(null);
+            if (req.status >= 200 && req.status < 300 && req.responseText) {
+              settings = JSON.parse(req.responseText);
+            }
+          }
+          if (settings && settings.title) document.title = settings.title;
+          if (settings && settings.favicon) applyRoundedFavicon(settings.favicon);
+        } catch (e) {}
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
