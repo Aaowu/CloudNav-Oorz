@@ -103,7 +103,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   // Search Mode State
-  const [searchMode, setSearchMode] = useState<SearchMode>('external');
+  const [searchMode, setSearchMode] = useState<SearchMode>('internal');
   const [externalSearchSources, setExternalSearchSources] = useState<ExternalSearchSource[]>([]);
   const [isLoadingSearchConfig, setIsLoadingSearchConfig] = useState(true);
   
@@ -630,7 +630,7 @@ function App() {
                 const searchConfigData = await searchConfigRes.json();
                 // 检查搜索配置是否有效（包含必要的字段）
                 if (searchConfigData && (searchConfigData.mode || searchConfigData.externalSources || searchConfigData.selectedSource)) {
-                    setSearchMode(searchConfigData.mode || 'external');
+                    setSearchMode('internal');
                     setExternalSearchSources(searchConfigData.externalSources || []);
                     // 加载已保存的选中搜索源
                     if (searchConfigData.selectedSource) {
@@ -669,7 +669,7 @@ function App() {
         loadFromLocal();
         
         // 如果从KV空间加载搜索配置失败，直接使用默认配置（不使用localStorage回退）
-        setSearchMode('external');
+        setSearchMode('internal');
         setExternalSearchSources([
             {
                 id: 'bing',
@@ -2240,11 +2240,9 @@ function App() {
 
             {/* 搜索模式切换 + 搜索框 */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              {/* 移动端搜索图标 - 仅在手机端显示，平板端隐藏 */}
               <button 
                 onClick={() => {
                   setIsMobileSearchOpen(!isMobileSearchOpen);
-                  // 手机端点击搜索图标时默认使用站外搜索
                   if (searchMode !== 'external') {
                     handleSearchModeChange('external');
                   }
@@ -2281,7 +2279,6 @@ function App() {
                     站外
                   </button>
                 </div>
-                
               </div>
 
               {/* 搜索框 */}
@@ -2319,14 +2316,12 @@ function App() {
                     </div>
                   </div>
                 )}
-                
-                {/* 搜索图标 */}
+
                 <div 
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer"
                   onMouseEnter={() => searchMode === 'external' && setIsIconHovered(true)}
                   onMouseLeave={() => setIsIconHovered(false)}
                   onClick={() => {
-                    // 移动端点击事件：显示搜索源选择窗口
                     if (searchMode === 'external') {
                       setShowSearchSourcePopup(!showSearchSourcePopup);
                     }
@@ -2374,7 +2369,7 @@ function App() {
                   inputMode="search"
                   enterKeyHint="search"
                 />
-                
+
                 {searchMode === 'external' && searchQuery.trim() && (
                   <button
                     onClick={handleExternalSearch}
@@ -2658,13 +2653,7 @@ function App() {
                                 <button onClick={() => setCatAuthModalData(categories.find(c => c.id === selectedCategory) || null)} className="mt-4 px-4 py-2 bg-amber-500 text-white rounded-lg">输入密码解锁</button>
                             </>
                         ) : (
-                            <>
-                                <Search size={40} className="opacity-30 mb-4" />
-                                <p>没有找到相关内容</p>
-                                {selectedCategory !== 'all' && (
-                                    <button onClick={() => { if(!requireAuth()) return; setIsModalOpen(true); }} className="mt-4 text-blue-500 hover:underline">添加一个?</button>
-                                )}
-                            </>
+                            <></>
                         )}
                     </div>
                  ) : (
@@ -2743,15 +2732,7 @@ function App() {
                       </div>
                     );
                   })
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-30 mb-4">
-                      <circle cx="11" cy="11" r="8"></circle>
-                      <path d="m21 21-4.35-4.35"></path>
-                    </svg>
-                    <p className="text-sm">其他目录中没有找到相关内容</p>
-                  </div>
-                )}
+                ) : null}
               </section>
             )}
         </div>
