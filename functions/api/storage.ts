@@ -12,6 +12,8 @@ interface WebsiteConfig {
   passwordExpiryDays?: number;
 }
 
+const AUTH_TIME_HEADER = 'x-auth-issued-at';
+
 const getCorsHeaders = (request: Request) => {
   const requestUrl = new URL(request.url);
   const origin = request.headers.get('Origin');
@@ -24,7 +26,67 @@ const getCorsHeaders = (request: Request) => {
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-auth-password',
+    'Access-Control-Allow-Headers': `Content-Type, x-auth-password, ${AUTH_TIME_HEADER}`,
+  };
+};
+
+const getWebsiteConfig = async (env: Env): Promise<WebsiteConfig> => {
+  const websiteConfigStr = await env.CLOUDNAV_KV.get('website_config');
+  return websiteConfigStr
+    ? JSON.parse(websiteConfigStr)
+    : { requirePasswordOnVisit: false, passwordExpiryDays: 7 };
+};
+
+const buildUnauthorizedResponse = (message: string, corsHeaders: Record<string, string>) =>
+  new Response(JSON.stringify({ error: message }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  });
+
+const validateAuth = async (
+  request: Request,
+  env: Env,
+  corsHeaders: Record<string, string>,
+  options: { requireSession?: boolean } = {}
+) => {
+  const serverPassword = env.PASSWORD;
+  if (!serverPassword) {
+    return {
+      ok: false,
+      response: new Response(JSON.stringify({ error: 'Server misconfigured: PASSWORD not set' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      }),
+    };
+  }
+
+  const providedPassword = request.headers.get('x-auth-password');
+  if (!providedPassword || providedPassword !== serverPassword) {
+    return {
+      ok: false,
+      response: buildUnauthorizedResponse('Unauthorized', corsHeaders),
+    };
+  }
+
+  const websiteConfig = await getWebsiteConfig(env);
+  const passwordExpiryDays = websiteConfig.passwordExpiryDays ?? 7;
+
+  if (options.requireSession && passwordExpiryDays > 0) {
+    const authIssuedAtRaw = request.headers.get(AUTH_TIME_HEADER);
+    const authIssuedAt = authIssuedAtRaw ? Number(authIssuedAtRaw) : NaN;
+    const expiryMs = passwordExpiryDays * 24 * 60 * 60 * 1000;
+
+    if (!Number.isFinite(authIssuedAt) || authIssuedAt <= 0 || Date.now() - authIssuedAt > expiryMs) {
+      return {
+        ok: false,
+        response: buildUnauthorizedResponse('密码已过期，请重新输入', corsHeaders),
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    websiteConfig,
   };
 };
 
@@ -96,14 +158,13 @@ export const onRequestOptions = async (context: { request: Request }) => {
 
 // GET: 获取数据
 export const onRequestGet = async (context: { env: Env; request: Request }) => {
+  const corsHeaders = getCorsHeaders(context.request);
   try {
     const { env, request } = context;
-    const corsHeaders = getCorsHeaders(request);
     const url = new URL(request.url);
     const checkAuth = url.searchParams.get('checkAuth');
     const getConfig = url.searchParams.get('getConfig');
-    const websiteConfigStr = await env.CLOUDNAV_KV.get('website_config');
-    const websiteConfig: WebsiteConfig = websiteConfigStr ? JSON.parse(websiteConfigStr) : { requirePasswordOnVisit: false, passwordExpiryDays: 7 };
+    const websiteConfig = await getWebsiteConfig(env);
     const serverPassword = env.PASSWORD;
     const requiresAuth = !!serverPassword && !!websiteConfig.requirePasswordOnVisit;
     
@@ -119,6 +180,10 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
     
     // 如果是获取配置请求
     if (getConfig === 'ai') {
+      const authCheck = await validateAuth(request, env, corsHeaders, { requireSession: true });
+      if (!authCheck.ok) {
+        return authCheck.response;
+      }
       const aiConfig = await env.CLOUDNAV_KV.get('ai_config');
       return new Response(aiConfig || '{}', {
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -191,37 +256,10 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
     
     // 如果开启了访问认证，读取数据时也需要密码
     if (requiresAuth) {
-      const password = request.headers.get('x-auth-password');
-      if (!password || password !== serverPassword) {
-        return new Response(JSON.stringify({ error: '密码错误' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+      const authCheck = await validateAuth(request, env, corsHeaders, { requireSession: true });
+      if (!authCheck.ok) {
+        return authCheck.response;
       }
-      
-      // 检查密码是否过期
-      const passwordExpiryDays = websiteConfig.passwordExpiryDays || 7;
-      
-      // 如果设置了密码过期时间，检查是否过期
-      if (passwordExpiryDays > 0) {
-        const lastAuthTime = await env.CLOUDNAV_KV.get('last_auth_time');
-        if (lastAuthTime) {
-          const lastTime = parseInt(lastAuthTime);
-          const now = Date.now();
-          const expiryMs = passwordExpiryDays * 24 * 60 * 60 * 1000;
-          
-          // 如果已过期，返回错误
-          if (now - lastTime > expiryMs) {
-            return new Response(JSON.stringify({ error: '密码已过期，请重新输入' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            });
-          }
-        }
-      }
-      
-      // 更新最后认证时间
-      await env.CLOUDNAV_KV.put('last_auth_time', Date.now().toString());
     }
     
     if (!data) {
@@ -237,7 +275,7 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
   } catch (err) {
     return new Response(JSON.stringify({ error: 'Failed to fetch data' }), {
       status: 500,
-      headers: corsHeaders,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
     });
   }
 };
@@ -256,24 +294,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     
     // 如果只是验证密码，不更新数据
     if (body.authOnly) {
-      if (!serverPassword) {
-        return new Response(JSON.stringify({ error: 'Server misconfigured: PASSWORD not set' }), { 
-            status: 500,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+      const authCheck = await validateAuth(request, env, corsHeaders);
+      if (!authCheck.ok) {
+        return authCheck.response;
       }
       
-      if (providedPassword !== serverPassword) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
-      }
-      
-      // 更新最后认证时间
-      await env.CLOUDNAV_KV.put('last_auth_time', Date.now().toString());
-      
-      return new Response(JSON.stringify({ success: true }), {
+      return new Response(JSON.stringify({ success: true, authenticatedAt: Date.now() }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
       });
     }
@@ -282,11 +308,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     if (body.saveConfig === 'search') {
       // 如果服务器设置了密码，需要验证密码
       if (serverPassword) {
-        if (!providedPassword || providedPassword !== serverPassword) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+        const authCheck = await validateAuth(request, env, corsHeaders, { requireSession: true });
+        if (!authCheck.ok) {
+          return authCheck.response;
         }
       }
       
@@ -308,10 +332,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       }
 
       if (!serverPassword || providedPassword !== serverPassword) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        const authCheck = await validateAuth(request, env, corsHeaders, { requireSession: true });
+        if (!authCheck.ok) {
+          return authCheck.response;
+        }
       }
       
       let finalIcon = icon;
@@ -337,11 +361,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     
     // 对于其他操作（保存AI配置、应用数据等），需要密码验证
     if (serverPassword) {
-      if (!providedPassword || providedPassword !== serverPassword) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+      const authCheck = await validateAuth(request, env, corsHeaders, { requireSession: true });
+      if (!authCheck.ok) {
+        return authCheck.response;
       }
     } else {
       return new Response(JSON.stringify({ error: 'Server misconfigured: PASSWORD not set' }), { 

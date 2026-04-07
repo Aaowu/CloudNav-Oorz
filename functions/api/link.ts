@@ -7,8 +7,44 @@ interface Env {
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-  'Access-Control-Allow-Headers': 'Content-Type, x-auth-password',
+  'Access-Control-Allow-Headers': 'Content-Type, x-auth-password, x-auth-issued-at',
   'Access-Control-Max-Age': '86400',
+};
+
+const validateAuth = async (request: Request, env: Env) => {
+  if (!env.PASSWORD) {
+    return new Response(JSON.stringify({ error: 'Server misconfigured: PASSWORD not set' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
+  const providedPassword = request.headers.get('x-auth-password');
+  if (!providedPassword || providedPassword !== env.PASSWORD) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
+  const websiteConfigRaw = await env.CLOUDNAV_KV.get('website_config');
+  const websiteConfig = websiteConfigRaw ? JSON.parse(websiteConfigRaw) : { passwordExpiryDays: 7 };
+  const passwordExpiryDays = websiteConfig.passwordExpiryDays ?? 7;
+
+  if (passwordExpiryDays > 0) {
+    const authIssuedAtRaw = request.headers.get('x-auth-issued-at');
+    const authIssuedAt = authIssuedAtRaw ? Number(authIssuedAtRaw) : NaN;
+    const expiryMs = passwordExpiryDays * 24 * 60 * 60 * 1000;
+
+    if (!Number.isFinite(authIssuedAt) || authIssuedAt <= 0 || Date.now() - authIssuedAt > expiryMs) {
+      return new Response(JSON.stringify({ error: '密码已过期，请重新输入' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
+    }
+  }
+
+  return null;
 };
 
 export const onRequestOptions = async () => {
@@ -21,18 +57,12 @@ export const onRequestOptions = async () => {
 export const onRequestPost = async (context: { request: Request; env: Env }) => {
   const { request, env } = context;
 
-  // 1. Auth Check
-  const providedPassword = request.headers.get('x-auth-password');
-  const serverPassword = env.PASSWORD;
-
-  if (!serverPassword || providedPassword !== serverPassword) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders },
-    });
-  }
-
   try {
+    const authError = await validateAuth(request, env);
+    if (authError) {
+      return authError;
+    }
+
     const newLinkData = await request.json() as any;
     
     // Validate input

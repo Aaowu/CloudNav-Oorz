@@ -87,11 +87,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   // 保存网站配置到 KV 空间
   const saveWebsiteConfigToKV = async (siteSettings: SiteSettings) => {
     try {
+        const authIssuedAt = localStorage.getItem('lastLoginTime');
         const response = await fetch('/api/storage', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-auth-password': authToken || ''
+                'x-auth-password': authToken || '',
+                ...(authIssuedAt ? { 'x-auth-issued-at': authIssuedAt } : {})
             },
             body: JSON.stringify({
                 saveConfig: 'website',
@@ -245,6 +247,7 @@ const extBackgroundJs = `// background.js - ${localSiteSettings.navTitle || 'Clo
 const CONFIG = {
   apiBase: "${domain}",
   password: "${password}",
+  authTimestamp: "${localStorage.getItem('lastLoginTime') || ''}",
   siteName: "${(localSiteSettings.navTitle || 'CloudNav').replace(/"/g, '\\"')}"
 };
 const MODE_KEY = 'cloudnav_ui_mode';
@@ -432,7 +435,8 @@ async function saveLink(title, url, categoryId, icon = '') {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-auth-password': CONFIG.password
+                'x-auth-password': CONFIG.password,
+                ...(CONFIG.authTimestamp ? { 'x-auth-issued-at': CONFIG.authTimestamp } : {})
             },
             body: JSON.stringify({
                 saveConfig: 'favicon',
@@ -452,7 +456,8 @@ async function saveLink(title, url, categoryId, icon = '') {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'x-auth-password': CONFIG.password
+                'x-auth-password': CONFIG.password,
+                ...(CONFIG.authTimestamp ? { 'x-auth-issued-at': CONFIG.authTimestamp } : {})
             },
             body: JSON.stringify({
                 title: title || '未命名',
@@ -569,7 +574,8 @@ function notify(title, message) {
 
 const extSidebarJs = `const CONFIG = {
   apiBase: "${domain}",
-  password: "${password}"
+  password: "${password}",
+  authTimestamp: "${localStorage.getItem('lastLoginTime') || ''}"
 };
 const CACHE_KEY = 'cloudnav_data';
 
@@ -713,7 +719,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             container.innerHTML = '<div class="loading">同步数据中...</div>';
             
             const res = await fetch(\`\${CONFIG.apiBase}/api/storage\`, {
-                headers: { 'x-auth-password': CONFIG.password }
+                headers: {
+                    'x-auth-password': CONFIG.password,
+                    ...(CONFIG.authTimestamp ? { 'x-auth-issued-at': CONFIG.authTimestamp } : {})
+                }
             });
             
             if (!res.ok) throw new Error("Sync failed");
@@ -840,7 +849,8 @@ const extPopupHtml = `<!DOCTYPE html>
 
 const extPopupJs = `const CONFIG = {
   apiBase: "${domain}",
-  password: "${password}"
+  password: "${password}",
+  authTimestamp: "${localStorage.getItem('lastLoginTime') || ''}"
 };
 const CACHE_KEY = 'cloudnav_data';
 
@@ -959,7 +969,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             refreshBtn.classList.add('rotating');
             const res = await fetch(\`\${CONFIG.apiBase}/api/storage\`, {
-                headers: { 'x-auth-password': CONFIG.password }
+                headers: {
+                    'x-auth-password': CONFIG.password,
+                    ...(CONFIG.authTimestamp ? { 'x-auth-issued-at': CONFIG.authTimestamp } : {})
+                }
             });
             if (!res.ok) throw new Error('同步失败');
 

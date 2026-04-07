@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, FileText, ArrowRight, Check, AlertCircle, FolderInput, ListTree, Database } from 'lucide-react';
-import { Category, LinkItem, SearchConfig, AIConfig } from '../types';
+import { Category, LinkItem, SearchConfig, AIConfig, WebDavConfig } from '../types';
 import { parseBookmarks } from '../services/bookmarkParser';
 
 interface ImportModalProps {
@@ -11,6 +11,7 @@ interface ImportModalProps {
   onImport: (newLinks: LinkItem[], newCategories: Category[]) => void;
   onImportSearchConfig?: (searchConfig: SearchConfig) => void;
   onImportAIConfig?: (aiConfig: AIConfig) => void;
+  onImportWebDavConfig?: (webDavConfig: WebDavConfig) => void;
 }
 
 const ImportModal: React.FC<ImportModalProps> = ({ 
@@ -20,7 +21,8 @@ const ImportModal: React.FC<ImportModalProps> = ({
   categories, 
   onImport,
   onImportSearchConfig,
-  onImportAIConfig
+  onImportAIConfig,
+  onImportWebDavConfig
 }) => {
   const [step, setStep] = useState<'upload' | 'preview'>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -36,17 +38,19 @@ const ImportModal: React.FC<ImportModalProps> = ({
   const [parsedCategories, setParsedCategories] = useState<Category[]>([]);
   const [parsedSearchConfig, setParsedSearchConfig] = useState<SearchConfig | null>(null);
   const [parsedAIConfig, setParsedAIConfig] = useState<AIConfig | null>(null);
+  const [parsedWebDavConfig, setParsedWebDavConfig] = useState<WebDavConfig | null>(null);
   
   // Options
   const [importMode, setImportMode] = useState<'original' | 'merge'>('original');
   const [targetCategoryId, setTargetCategoryId] = useState<string>(categories[0]?.id || 'common');
   const [importType, setImportType] = useState<'html' | 'json'>('html');
+  const [shouldImportWebDavConfig, setShouldImportWebDavConfig] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
   // Parse JSON backup file
-  const parseJsonBackup = async (file: File): Promise<{ links: LinkItem[], categories: Category[], searchConfig?: SearchConfig, aiConfig?: AIConfig }> => {
+  const parseJsonBackup = async (file: File): Promise<{ links: LinkItem[], categories: Category[], searchConfig?: SearchConfig, aiConfig?: AIConfig, webDavConfig?: WebDavConfig }> => {
     const text = await file.text();
     const data = JSON.parse(text);
     
@@ -59,7 +63,8 @@ const ImportModal: React.FC<ImportModalProps> = ({
       links: data.links,
       categories: data.categories,
       searchConfig: data.searchConfig,
-      aiConfig: data.aiConfig
+      aiConfig: data.aiConfig,
+      webDavConfig: data.webDavConfig
     };
   };
 
@@ -72,10 +77,12 @@ const ImportModal: React.FC<ImportModalProps> = ({
     setParsedCategories([]);
     setParsedSearchConfig(null);
     setParsedAIConfig(null);
+    setParsedWebDavConfig(null);
     setNewLinksCount(0);
     setDuplicateCount(0);
     setNewCategoriesCount(0);
     setImportType('html');
+    setShouldImportWebDavConfig(false);
   };
 
   const handleClose = () => {
@@ -92,7 +99,7 @@ const ImportModal: React.FC<ImportModalProps> = ({
     setImportType(type);
 
     try {
-        let result: { links: LinkItem[], categories: Category[], searchConfig?: SearchConfig, aiConfig?: AIConfig };
+        let result: { links: LinkItem[], categories: Category[], searchConfig?: SearchConfig, aiConfig?: AIConfig, webDavConfig?: WebDavConfig };
         
         if (type === 'html') {
             result = await parseBookmarks(selectedFile);
@@ -123,6 +130,7 @@ const ImportModal: React.FC<ImportModalProps> = ({
         setParsedCategories(uniqueNewCategories);
         setParsedSearchConfig(result.searchConfig || null);
         setParsedAIConfig(result.aiConfig || null);
+        setParsedWebDavConfig(result.webDavConfig || null);
         setNewLinksCount(uniqueNewLinks.length);
         setDuplicateCount(duplicates);
         setNewCategoriesCount(uniqueNewCategories.length);
@@ -199,6 +207,10 @@ const ImportModal: React.FC<ImportModalProps> = ({
       // Import AI config if available
       if (parsedAIConfig && onImportAIConfig) {
           onImportAIConfig(parsedAIConfig);
+      }
+
+      if (shouldImportWebDavConfig && parsedWebDavConfig && onImportWebDavConfig) {
+          onImportWebDavConfig(parsedWebDavConfig);
       }
       
       handleClose();
@@ -342,6 +354,20 @@ const ImportModal: React.FC<ImportModalProps> = ({
                                 </div>
                             </label>
                         </div>
+                    )}
+
+                    {importType === 'json' && parsedWebDavConfig && (
+                        <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer transition-all">
+                            <input
+                                type="checkbox"
+                                checked={shouldImportWebDavConfig}
+                                onChange={(e) => setShouldImportWebDavConfig(e.target.checked)}
+                            />
+                            <div>
+                                <div className="font-medium text-sm dark:text-white">同步恢复 WebDAV 配置</div>
+                                <p className="text-xs text-slate-500 mt-1">勾上后会覆盖当前浏览器里保存的 WebDAV 地址、账号和应用密码。</p>
+                            </div>
+                        </label>
                     )}
                 </div>
             )}

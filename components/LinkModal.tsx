@@ -96,11 +96,13 @@ const LinkModal: React.FC<LinkModalProps> = ({ isOpen, onClose, onSave, onDelete
       // 将自定义图标保存到KV缓存
       const authToken = localStorage.getItem('cloudnav_auth_token');
       if (authToken) {
+        const authIssuedAt = localStorage.getItem('lastLoginTime');
         const response = await fetch('/api/storage', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-auth-password': authToken
+            'x-auth-password': authToken,
+            ...(authIssuedAt ? { 'x-auth-issued-at': authIssuedAt } : {})
           },
           body: JSON.stringify({
             saveConfig: 'favicon',
@@ -233,11 +235,13 @@ const LinkModal: React.FC<LinkModalProps> = ({ isOpen, onClose, onSave, onDelete
       try {
         const authToken = localStorage.getItem('cloudnav_auth_token');
         if (authToken) {
+          const authIssuedAt = localStorage.getItem('lastLoginTime');
           await fetch('/api/storage', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-auth-password': authToken
+              'x-auth-password': authToken,
+              ...(authIssuedAt ? { 'x-auth-issued-at': authIssuedAt } : {})
             },
             body: JSON.stringify({
               saveConfig: 'favicon',

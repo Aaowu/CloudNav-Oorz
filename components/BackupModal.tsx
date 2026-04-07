@@ -12,6 +12,7 @@ interface BackupModalProps {
   onRestore: (links: LinkItem[], categories: Category[]) => void;
   webDavConfig: WebDavConfig;
   onSaveWebDavConfig: (config: WebDavConfig) => void;
+  onRestoreWebDavConfig: (config: WebDavConfig) => void;
   searchConfig: SearchConfig;
   onRestoreSearchConfig: (searchConfig: SearchConfig) => void;
   aiConfig: AIConfig;
@@ -19,19 +20,31 @@ interface BackupModalProps {
 }
 
 const BackupModal: React.FC<BackupModalProps> = ({ 
-  isOpen, onClose, links, categories, onRestore, webDavConfig, onSaveWebDavConfig, searchConfig, onRestoreSearchConfig, aiConfig, onRestoreAIConfig 
+  isOpen, onClose, links, categories, onRestore, webDavConfig, onSaveWebDavConfig, onRestoreWebDavConfig, searchConfig, onRestoreSearchConfig, aiConfig, onRestoreAIConfig 
 }) => {
   const [config, setConfig] = useState<WebDavConfig>(webDavConfig);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'uploading' | 'downloading' | 'success' | 'error'>('idle');
   const [statusMsg, setStatusMsg] = useState('');
+  const [includeWebDavConfig, setIncludeWebDavConfig] = useState(false);
+  const [restoreWebDavConfig, setRestoreWebDavConfig] = useState(false);
+
+  const buildBackupPayload = () => ({
+    links,
+    categories,
+    searchConfig,
+    aiConfig,
+    ...(includeWebDavConfig ? { webDavConfig: config } : {})
+  });
 
   useEffect(() => {
     if(isOpen) {
         setConfig(webDavConfig);
         setTestResult(null);
         setSyncStatus('idle');
+        setIncludeWebDavConfig(false);
+        setRestoreWebDavConfig(false);
     }
   }, [isOpen, webDavConfig]);
 
@@ -54,7 +67,7 @@ const BackupModal: React.FC<BackupModalProps> = ({
   const handleBackupToCloud = async () => {
     setSyncStatus('uploading');
     setStatusMsg('正在上传...');
-    const success = await uploadBackup(config, { links, categories, searchConfig, aiConfig });
+    const success = await uploadBackup(config, buildBackupPayload());
     if (success) {
         setSyncStatus('success');
         setStatusMsg('备份成功！');
@@ -67,7 +80,7 @@ const BackupModal: React.FC<BackupModalProps> = ({
   const handleBackupToCloudWithTimestamp = async () => {
     setSyncStatus('uploading');
     setStatusMsg('正在上传...');
-    const result = await uploadBackupWithTimestamp(config, { links, categories, searchConfig, aiConfig });
+    const result = await uploadBackupWithTimestamp(config, buildBackupPayload());
     if (result.success) {
         setSyncStatus('success');
         setStatusMsg(`备份成功！文件名: ${result.filename}`);
@@ -94,6 +107,9 @@ const BackupModal: React.FC<BackupModalProps> = ({
         if (data.aiConfig) {
             onRestoreAIConfig(data.aiConfig);
         }
+        if (restoreWebDavConfig && data.webDavConfig) {
+            onRestoreWebDavConfig(data.webDavConfig);
+        }
         setSyncStatus('success');
         setStatusMsg('恢复成功！');
     } else {
@@ -109,7 +125,7 @@ const BackupModal: React.FC<BackupModalProps> = ({
   };
 
   const handleExportJson = () => {
-    const data = { links, categories, searchConfig, aiConfig };
+    const data = buildBackupPayload();
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -241,6 +257,24 @@ const BackupModal: React.FC<BackupModalProps> = ({
                         <span className="text-xs text-slate-500 mt-1">带时间戳</span>
                     </button>
                 </div>
+                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <input
+                        type="checkbox"
+                        checked={includeWebDavConfig}
+                        onChange={(e) => setIncludeWebDavConfig(e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>备份时带上当前 WebDAV 配置</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <input
+                        type="checkbox"
+                        checked={restoreWebDavConfig}
+                        onChange={(e) => setRestoreWebDavConfig(e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>恢复时同步覆盖本地 WebDAV 配置</span>
+                </label>
                 
                 {syncStatus !== 'idle' && (
                     <div className={`text-sm text-center p-2 rounded ${
@@ -274,7 +308,7 @@ const BackupModal: React.FC<BackupModalProps> = ({
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-700/30 flex items-center justify-between">
                     <div>
                         <h5 className="text-sm font-medium dark:text-slate-200">导出 cloudnav_backup.json 文件</h5>
-                        <p className="text-xs text-slate-500 mt-1">与 WebDAV 备份格式一致，便于数据迁移</p>
+                        <p className="text-xs text-slate-500 mt-1">与 WebDAV 备份格式一致，可按上面的开关决定是否带上 WebDAV 配置</p>
                     </div>
                     <button 
                         onClick={handleExportJson}

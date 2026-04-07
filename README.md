@@ -3,6 +3,21 @@
 https://github.com/sese972010/CloudNav-
 https://github.com/aabacada/CloudNav-abcd
 两个融合 并根据自身需求做了一些修改 
+
+<details>
+<summary>更新日志</summary>
+
+### 2026.04.07
+
+1. 修复 AI 配置可被未授权读取的问题，`/api/storage?getConfig=ai` 现已要求登录校验。
+2. 修复 WebDAV 代理接口未鉴权的问题，备份、恢复、测试连接现在都需要有效登录态。
+3. 调整登录过期校验逻辑，改为按当前客户端登录时间判断，不再共用 KV 里的全局时间戳。
+4. 删除 `index.html` 里不存在的 `/index.css` 引用，避免额外 404 请求。
+5. 备份与恢复新增可选同步 WebDAV 配置，导出 JSON、WebDAV 上传、WebDAV 恢复、本地 JSON 导入现已统一支持。
+6. README 补充了 WebDAV 配置可选迁移说明。
+
+</details>
+
 # CloudNav (云航) - 智能私有导航站
 
 <div align="center">
@@ -39,7 +54,7 @@ https://github.com/aabacada/CloudNav-abcd
 ### ☁️ 数据同步与安全
 *   **Cloudflare KV 同步**: 利用边缘存储技术，公司、家里、手机三端数据秒级同步。
 *   **链接图标持久化**: 第一次添加链接时自动抓取并存进 Cloudflare KV，换设备打开也不用重新补图标。
-*   **WebDAV 双重备份**: 支持坚果云、Nextcloud 等 WebDAV 网盘备份，数据自主掌控。
+*   **WebDAV 双重备份**: 支持坚果云、Nextcloud 等 WebDAV 网盘备份，数据自主掌控，并可选把当前 WebDAV 配置一起打包同步。
 *   **隐私加密体系**:
     *   **全局锁**: 部署时设置访问密码，防止他人查看。
     *   **目录锁**: 支持对“私有资源”等特定分类单独设置密码，隐藏敏感内容。
@@ -157,6 +172,7 @@ https://github.com/aabacada/CloudNav-abcd
 
 ### 3. WebDAV 备份
 点击侧边栏的 **“备份”** 图标，配置 WebDAV 信息 (如坚果云)，即可一键上传备份到云端。
+如果你想把当前 WebDAV 地址、账号和应用密码一起迁移，也可以在备份时勾选同步 WebDAV 配置，恢复或导入时再决定要不要覆盖本地配置。
 
 ### 4. 本地数据导出 (Local Data Export)
 点击侧边栏的 **“备份”** 图标 -> **“导出 HTML”**。

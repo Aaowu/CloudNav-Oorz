@@ -1,13 +1,88 @@
 
-export const onRequestPost = async (context: { request: Request }) => {
-  const { request } = context;
+interface Env {
+  CLOUDNAV_KV: any;
+  PASSWORD: string;
+}
+
+interface WebsiteConfig {
+  passwordExpiryDays?: number;
+}
+
+const AUTH_TIME_HEADER = 'x-auth-issued-at';
+
+const getCorsHeaders = (request: Request) => {
+  const requestUrl = new URL(request.url);
+  const origin = request.headers.get('Origin');
+  const allowOrigin = origin && (
+    origin === requestUrl.origin ||
+    origin.startsWith('chrome-extension://') ||
+    origin.startsWith('moz-extension://')
+  ) ? origin : requestUrl.origin;
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': `Content-Type, x-auth-password, ${AUTH_TIME_HEADER}`,
+  };
+};
+
+const getWebsiteConfig = async (env: Env): Promise<WebsiteConfig> => {
+  const rawConfig = await env.CLOUDNAV_KV.get('website_config');
+  return rawConfig ? JSON.parse(rawConfig) : { passwordExpiryDays: 7 };
+};
+
+const buildJsonResponse = (body: unknown, status: number, corsHeaders: Record<string, string>) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  });
+
+const validateAuth = async (request: Request, env: Env, corsHeaders: Record<string, string>) => {
+  if (!env.PASSWORD) {
+    return buildJsonResponse({ error: 'Server misconfigured: PASSWORD not set' }, 500, corsHeaders);
+  }
+
+  const providedPassword = request.headers.get('x-auth-password');
+  if (!providedPassword || providedPassword !== env.PASSWORD) {
+    return buildJsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+  }
+
+  const websiteConfig = await getWebsiteConfig(env);
+  const passwordExpiryDays = websiteConfig.passwordExpiryDays ?? 7;
+  if (passwordExpiryDays > 0) {
+    const authIssuedAtRaw = request.headers.get(AUTH_TIME_HEADER);
+    const authIssuedAt = authIssuedAtRaw ? Number(authIssuedAtRaw) : NaN;
+    const expiryMs = passwordExpiryDays * 24 * 60 * 60 * 1000;
+
+    if (!Number.isFinite(authIssuedAt) || authIssuedAt <= 0 || Date.now() - authIssuedAt > expiryMs) {
+      return buildJsonResponse({ error: '密码已过期，请重新输入' }, 401, corsHeaders);
+    }
+  }
+
+  return null;
+};
+
+export const onRequestOptions = async (context: { request: Request }) =>
+  new Response(null, {
+    status: 204,
+    headers: getCorsHeaders(context.request),
+  });
+
+export const onRequestPost = async (context: { request: Request; env: Env }) => {
+  const { request, env } = context;
+  const corsHeaders = getCorsHeaders(request);
   
   try {
+    const authError = await validateAuth(request, env, corsHeaders);
+    if (authError) {
+      return authError;
+    }
+
     const body = await request.json() as any;
     const { operation, config, payload, filename } = body;
     
     if (!config || !config.url || !config.username || !config.password) {
-        return new Response(JSON.stringify({ error: 'Missing configuration' }), { status: 400 });
+        return buildJsonResponse({ error: 'Missing configuration' }, 400, corsHeaders);
     }
 
     let baseUrl = config.url.trim();
@@ -39,7 +114,7 @@ export const onRequestPost = async (context: { request: Request }) => {
         fetchUrl = fileUrl;
         method = 'GET';
     } else {
-        return new Response(JSON.stringify({ error: 'Invalid operation' }), { status: 400 });
+        return buildJsonResponse({ error: 'Invalid operation' }, 400, corsHeaders);
     }
 
     const response = await fetch(fetchUrl, {
@@ -51,23 +126,19 @@ export const onRequestPost = async (context: { request: Request }) => {
     if (operation === 'download') {
         if (!response.ok) {
              if (response.status === 404) {
-                 return new Response(JSON.stringify({ error: 'Backup file not found' }), { status: 404 });
+                 return buildJsonResponse({ error: 'Backup file not found' }, 404, corsHeaders);
              }
-             return new Response(JSON.stringify({ error: `WebDAV Error: ${response.status}` }), { status: response.status });
+             return buildJsonResponse({ error: `WebDAV Error: ${response.status}` }, response.status, corsHeaders);
         }
         const data = await response.json();
-        return new Response(JSON.stringify(data), { 
-            headers: { 'Content-Type': 'application/json' } 
-        });
+        return buildJsonResponse(data, 200, corsHeaders);
     }
 
     const success = response.ok || response.status === 207;
     
-    return new Response(JSON.stringify({ success, status: response.status }), { 
-        headers: { 'Content-Type': 'application/json' } 
-    });
+    return buildJsonResponse({ success, status: response.status }, 200, corsHeaders);
 
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return buildJsonResponse({ error: err.message }, 500, corsHeaders);
   }
 };

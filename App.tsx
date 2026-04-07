@@ -44,6 +44,7 @@ const GITHUB_REPO_URL = 'https://github.com/Aaowu/CloudNav-Oorz';
 
 const LOCAL_STORAGE_KEY = 'cloudnav_data_cache';
 const AUTH_KEY = 'cloudnav_auth_token';
+const AUTH_TIME_KEY = 'lastLoginTime';
 const WEBDAV_CONFIG_KEY = 'cloudnav_webdav_config';
 const AI_CONFIG_KEY = 'cloudnav_ai_config';
 const SEARCH_CONFIG_KEY = 'cloudnav_search_config';
@@ -235,6 +236,21 @@ function App() {
     categoryId: '',
     categoryName: ''
   });
+
+  const buildAuthHeaders = (token?: string | null, extraHeaders: Record<string, string> = {}) => {
+    const headers: Record<string, string> = { ...extraHeaders };
+    const resolvedToken = token ?? authToken ?? localStorage.getItem(AUTH_KEY);
+    const authIssuedAt = localStorage.getItem(AUTH_TIME_KEY);
+
+    if (resolvedToken) {
+      headers['x-auth-password'] = resolvedToken;
+    }
+    if (authIssuedAt) {
+      headers['x-auth-issued-at'] = authIssuedAt;
+    }
+
+    return headers;
+  };
   
   // --- Helpers & Sync Logic ---
 
@@ -291,10 +307,9 @@ function App() {
     try {
         const response = await fetch('/api/storage', {
             method: 'POST',
-            headers: {
+            headers: buildAuthHeaders(token, {
                 'Content-Type': 'application/json',
-                'x-auth-password': token
-            },
+            }),
             body: JSON.stringify({ links: newLinks, categories: newCategories })
         });
 
@@ -546,7 +561,7 @@ function App() {
 
     // Load Token and check expiry
     const savedToken = localStorage.getItem(AUTH_KEY);
-    const lastLoginTime = localStorage.getItem('lastLoginTime');
+    const lastLoginTime = localStorage.getItem(AUTH_TIME_KEY);
     
     if (savedToken) {
       const currentTime = Date.now();
@@ -560,7 +575,7 @@ function App() {
         
         if (expiryTimeMs > 0 && timeDiff > expiryTimeMs) {
           localStorage.removeItem(AUTH_KEY);
-          localStorage.removeItem('lastLoginTime');
+          localStorage.removeItem(AUTH_TIME_KEY);
           setAuthToken(null);
         } else {
           setAuthToken(savedToken);
@@ -620,7 +635,7 @@ function App() {
         let hasCloudData = false;
         try {
             const res = await fetch('/api/storage', {
-                headers: authToken ? { 'x-auth-password': authToken } : {}
+                headers: authToken ? buildAuthHeaders(authToken) : {}
             });
             if (res.ok) {
                 const data = await res.json();
@@ -957,6 +972,7 @@ function App() {
         });
         
         if (authResponse.ok) {
+            const authPayload = await authResponse.json();
             setAuthToken(password);
             localStorage.setItem(AUTH_KEY, password);
             setIsAuthOpen(false);
@@ -984,7 +1000,7 @@ function App() {
             }
             
             // 检查密码是否过期
-            const lastLoginTime = localStorage.getItem('lastLoginTime');
+            const lastLoginTime = localStorage.getItem(AUTH_TIME_KEY);
             const currentTime = Date.now();
             
             if (lastLoginTime) {
@@ -996,17 +1012,20 @@ function App() {
                 if (expiryTimeMs > 0 && timeDiff > expiryTimeMs) {
                     setAuthToken(null);
                     localStorage.removeItem(AUTH_KEY);
+                    localStorage.removeItem(AUTH_TIME_KEY);
                     setIsAuthOpen(true);
                     alert('您的密码已过期，请重新登录');
                     return false;
                 }
             }
             
-            localStorage.setItem('lastLoginTime', currentTime.toString());
+            localStorage.setItem(AUTH_TIME_KEY, String(authPayload.authenticatedAt || currentTime));
             
             // 登录成功后，从服务器获取数据
             try {
-                const res = await fetch('/api/storage');
+                const res = await fetch('/api/storage', {
+                    headers: buildAuthHeaders(password)
+                });
                 if (res.ok) {
                     const data = await res.json();
                     // 如果服务器有数据，使用服务器数据
@@ -1036,7 +1055,9 @@ function App() {
             
             // 登录成功后，从KV空间加载AI配置
             try {
-                const aiConfigRes = await fetch('/api/storage?getConfig=ai');
+                const aiConfigRes = await fetch('/api/storage?getConfig=ai', {
+                    headers: buildAuthHeaders(password)
+                });
                 if (aiConfigRes.ok) {
                     const aiConfigData = await aiConfigRes.json();
                     if (aiConfigData && Object.keys(aiConfigData).length > 0) {
@@ -1064,6 +1085,7 @@ function App() {
   const handleLogout = () => {
       setAuthToken(null);
       localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(AUTH_TIME_KEY);
       setPendingProtectedCategoryId(null);
       setSyncStatus('offline');
       // 退出后重新加载本地数据
@@ -1076,10 +1098,9 @@ function App() {
       // 验证密码
       const authResponse = await fetch('/api/storage', {
         method: 'POST',
-        headers: {
+        headers: buildAuthHeaders(password, {
           'Content-Type': 'application/json',
-          'x-auth-password': password
-        },
+        }),
         body: JSON.stringify({ authOnly: true })
       });
       
@@ -1383,10 +1404,9 @@ function App() {
           try {
               const response = await fetch('/api/storage', {
                   method: 'POST',
-                  headers: {
+                  headers: buildAuthHeaders(authToken, {
                       'Content-Type': 'application/json',
-                      'x-auth-password': authToken
-                  },
+                  }),
                   body: JSON.stringify({
                       saveConfig: 'ai',
                       config: config
@@ -1404,10 +1424,9 @@ function App() {
               try {
                   const response = await fetch('/api/storage', {
                       method: 'POST',
-                      headers: {
+                      headers: buildAuthHeaders(authToken, {
                           'Content-Type': 'application/json',
-                          'x-auth-password': authToken
-                      },
+                      }),
                       body: JSON.stringify({
                           saveConfig: 'website',
                           config: newSiteSettings
@@ -1433,10 +1452,9 @@ function App() {
           try {
               const response = await fetch('/api/storage', {
                   method: 'POST',
-                  headers: {
+                  headers: buildAuthHeaders(authToken, {
                       'Content-Type': 'application/json',
-                      'x-auth-password': authToken
-                  },
+                  }),
                   body: JSON.stringify({
                       saveConfig: 'ai',
                       config: config
@@ -1514,6 +1532,10 @@ function App() {
       localStorage.setItem(WEBDAV_CONFIG_KEY, JSON.stringify(config));
   };
 
+  const handleRestoreWebDavConfig = (config: WebDavConfig) => {
+      handleSaveWebDavConfig(config);
+  };
+
   // 搜索源选择弹出窗口状态
   const [showSearchSourcePopup, setShowSearchSourcePopup] = useState(false);
   const [hoveredSearchSource, setHoveredSearchSource] = useState<ExternalSearchSource | null>(null);
@@ -1586,14 +1608,11 @@ function App() {
       }
 
       try {
-          const headers: Record<string, string> = {
-              'Content-Type': 'application/json'
-          };
-          headers['x-auth-password'] = authToken;
-          
           const response = await fetch('/api/storage', {
               method: 'POST',
-              headers: headers,
+              headers: buildAuthHeaders(authToken, {
+                  'Content-Type': 'application/json'
+              }),
               body: JSON.stringify({
                   saveConfig: 'search',
                   config: searchConfig
@@ -2193,6 +2212,7 @@ function App() {
         onRestore={handleRestoreBackup}
         webDavConfig={webDavConfig}
         onSaveWebDavConfig={handleSaveWebDavConfig}
+        onRestoreWebDavConfig={handleRestoreWebDavConfig}
         searchConfig={{ mode: searchMode, externalSources: externalSearchSources }}
         onRestoreSearchConfig={handleRestoreSearchConfig}
         aiConfig={aiConfig}
@@ -2207,6 +2227,7 @@ function App() {
         onImport={handleImportConfirm}
         onImportSearchConfig={handleRestoreSearchConfig}
         onImportAIConfig={handleRestoreAIConfig}
+        onImportWebDavConfig={handleRestoreWebDavConfig}
       />
 
       <SettingsModal
